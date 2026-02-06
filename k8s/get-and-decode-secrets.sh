@@ -3,7 +3,7 @@
 {
 
 # DevOps-Utilities
-# Copyright (C) 2025  https://github.com/balsgh/DevOps-Utilities
+# Copyright (C) 2025-2026  https://github.com/balsgh/DevOps-Utilities
 #
 # This file is part of DevOps-Utilities.
 #
