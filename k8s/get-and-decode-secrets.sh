@@ -35,6 +35,93 @@ _lines_to_array() {
 # printf %b interprets \e etc. on Bash 3.2+ and Linux (echo -e does not on macOS)
 say() { printf '%b\n' "$*"; }
 
+_b64_decode() { echo "$1" | base64 -d 2>/dev/null; }
+
+_is_x509_certificate() {
+    _b64_decode "$1" | openssl x509 -noout -subject > /dev/null 2>&1
+}
+
+_is_private_key() {
+    _b64_decode "$1" | openssl pkey -noout > /dev/null 2>&1
+}
+
+_key_name_suggests_certificate() {
+    [[ "$1" =~ \.(crt|cer|pem)$ || "$1" =~ ^(tls\.crt|ca\.crt)$ ]] && [[ ! "$1" =~ \.key(\.pem)?$ ]]
+}
+
+_key_name_suggests_private_key() {
+    [[ "$1" = "tls.key" || "$1" =~ \.key(\.pem)?$ ]]
+}
+
+_show_decoded_certificate() {
+    local _ctx="$1" _ns="$2" _secret="$3" _key="$4" _b64="$5"
+    if _is_x509_certificate "${_b64}"; then
+        say "✅ \e[32mSUCCESS:\e[00m /[${_ctx}]/[${_ns}]/[${_secret}]/.data.[${_key}]:";
+        openssl storeutl -noout -text -certs <(_b64_decode "${_b64}") | \
+            grep --color=always -E \
+                -e "^([[:digit:]])+: Certificate$" \
+                -e "Serial Number:" \
+                -e "^[[:space:]]{12}([[:xdigit:]]{2}:){15}[[:xdigit:]]{2}$" \
+                -e "Issuer:" \
+                -e "Not Before:" \
+                -e "Not After :" \
+                -e "Subject:" \
+                -e "CN=" \
+                -e "Subject Alternative Name:" \
+                -e "DNS:" \
+                -e "Total found:";
+        return 0
+    fi
+    say "❌ \e[31mERROR:\e[00m Unable to decode certificate at /[${_ctx}]/[${_ns}]/[${_secret}]/.data.[${_key}]:";
+    say "❌ \e[31mERROR:\e[00m Base64 ENCODED returned value was; \n[${_b64}\n]";
+    say "❌ \e[31mERROR:\e[00m Base64 DECODED returned value was; \n[$(_b64_decode "${_b64}")\n]";
+    return 1
+}
+
+_find_secret_certificate_b64() {
+    local _ctx="$1" _ns="$2" _secret="$3" _keys _key _val
+    _val="$(kubectl --context "${_ctx}" -n "${_ns}" get secret "${_secret}" -o jsonpath='{.data.tls\.crt}' 2>/dev/null)"
+    if [[ -n "${_val}" ]] && _is_x509_certificate "${_val}"; then
+        echo "${_val}"
+        return 0
+    fi
+    _lines_to_array _keys < <(kubectl --context "${_ctx}" -n "${_ns}" get secret "${_secret}" -o=yaml | yq '.data' | cut -d: -f1)
+    for _key in "${_keys[@]}"; do
+        _val="$(kubectl --context "${_ctx}" -n "${_ns}" get secret "${_secret}" -o=yaml | yq ".data.\"${_key}\"")"
+        if _is_x509_certificate "${_val}"; then
+            echo "${_val}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+_show_decoded_private_key() {
+    local _ctx="$1" _ns="$2" _secret="$3" _key="$4" _b64="$5" _cert_b64 _mod_key _mod_cert
+    if ! _is_private_key "${_b64}"; then
+        say "❌ \e[31mERROR:\e[00m Unable to decode private key at /[${_ctx}]/[${_ns}]/[${_secret}]/.data.[${_key}]:";
+        say "❌ \e[31mERROR:\e[00m Base64 DECODED returned value was; \n[$(_b64_decode "${_b64}")\n]";
+        return 1
+    fi
+    _b64_decode "${_b64}" | openssl pkey -noout -check 2>/dev/null || _b64_decode "${_b64}" | openssl pkey -noout
+    if _b64_decode "${_b64}" | openssl rsa -noout -check > /dev/null 2>&1; then
+        _cert_b64="$(_find_secret_certificate_b64 "${_ctx}" "${_ns}" "${_secret}")" || true
+        if [[ -n "${_cert_b64}" ]]; then
+            _mod_key="$(_b64_decode "${_b64}" | openssl rsa -modulus -noout | openssl md5 | awk '{print $2}')"
+            _mod_cert="$(_b64_decode "${_cert_b64}" | openssl x509 -modulus -noout | openssl md5 | awk '{print $2}')"
+            if [[ "${_mod_key}" = "${_mod_cert}" ]]; then
+                say "✅ \e[32mSUCCESS:\e[00m MATCH /[${_ctx}]/[${_ns}]/[${_secret}]/.data.[${_key}] + secret certificate data";
+            else
+                say "❌ \e[31mERROR:\e[00m MISMATCH /[${_ctx}]/[${_ns}]/[${_secret}]/.data.[${_key}] + secret certificate data";
+            fi
+        else
+            say "✅ \e[32mSUCCESS:\e[00m /[${_ctx}]/[${_ns}]/[${_secret}]/.data.[${_key}] (no certificate found in secret for modulus check)";
+        fi
+    else
+        say "✅ \e[32mSUCCESS:\e[00m /[${_ctx}]/[${_ns}]/[${_secret}]/.data.[${_key}] (non-RSA private key)";
+    fi
+}
+
 #GET_AND_DECODE_SECRETS
 unset -f GET_AND_DECODE_SECRETS; function GET_AND_DECODE_SECRETS() {
 clear;
@@ -100,39 +187,12 @@ else
                                                         say "\e[35mWARNING:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]=[${VALUE_ENCODED}]";
                                                         say "\e[35mWARNING:\e[00m [$(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq ".data" | grep -E "^${KEY}: ")]";
                                                     else
-                                                        if [[ "${KEY}" =~ ^(tls.crt|ca.crt)$ ]]; then
-                                                            if ( openssl x509 -noout -subject -issuer -dates -in <(echo "${VALUE_ENCODED}" | base64 -d) > /dev/null 2>&1 ); then 
-                                                                say "✅ \e[32mSUCCESS:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]:";
-                                                                # openssl x509 -noout -text -in <(echo "${VALUE_ENCODED}" | base64 -d); echo;
-                                                                openssl storeutl -noout -text -certs <(echo "${VALUE_ENCODED}" | base64 -d) | \
-                                                                    grep --color=always -E \
-                                                                        -e "^([[:digit:]])+: Certificate$" \
-                                                                        -e "Serial Number:" \
-                                                                        -e "^[[:space:]]{12}([[:xdigit:]]{2}:){15}[[:xdigit:]]{2}$" \
-                                                                        -e "Issuer:" \
-                                                                        -e "Not Before:" \
-                                                                        -e "Not After :" \
-                                                                        -e "Subject:" \
-                                                                        -e "CN=" \
-                                                                        -e "Subject Alternative Name:" \
-                                                                        -e "DNS:" \
-                                                                        -e "Total found:";
-                                                            else
-                                                                say "❌ \e[31mERROR:\e[00m Unable to decode certificate at /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]:";
-                                                                say "❌ \e[31mERROR:\e[00m Base64 ENCODED returned value was; \n[${VALUE_ENCODED}\n]";
-                                                                say "❌ \e[31mERROR:\e[00m Base64 DECODED returned value was; \n[$(echo "${VALUE_ENCODED}" | base64 -d)]\n";
-                                                            fi;
-                                                        elif [[ "${KEY}" = "tls.key" ]]; then
-                                                            echo "${VALUE_ENCODED}" | base64 -d | openssl rsa --noout -check;
-                                                            VAR_MODULUS_KEY=$(echo "${VALUE_ENCODED}" | base64 -d | openssl rsa -modulus -noout | openssl md5 | awk '{print $2}');
-                                                            VAR_MODULUS_CERT=$(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -modulus -noout | openssl md5 | awk '{print $2}');
-                                                            if [[ "${VAR_MODULUS_KEY}" = "${VAR_MODULUS_CERT}" ]]; then
-                                                                say "✅ \e[32mSUCCESS:\e[00m MATCH /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] + /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.tls.crt";
-                                                            else
-                                                                say "❌ \e[31mERROR:\e[00m MISMATCH /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] + /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.tls.crt";
-                                                            fi;
+                                                        if _is_x509_certificate "${VALUE_ENCODED}" || _key_name_suggests_certificate "${KEY}"; then
+                                                            _show_decoded_certificate "${CONTEXT}" "${NAMESPACE}" "${SECRET}" "${KEY}" "${VALUE_ENCODED}";
+                                                        elif _is_private_key "${VALUE_ENCODED}" || _key_name_suggests_private_key "${KEY}"; then
+                                                            _show_decoded_private_key "${CONTEXT}" "${NAMESPACE}" "${SECRET}" "${KEY}" "${VALUE_ENCODED}";
                                                         else
-                                                            say "✅ \e[32mSUCCESS:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] = [\n$(echo "${VALUE_ENCODED}" | base64 -d)\n]";
+                                                            say "✅ \e[32mSUCCESS:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] = [\n$(_b64_decode "${VALUE_ENCODED}")\n]";
                                                         fi;
                                                     fi;
 	                                                  echo;
