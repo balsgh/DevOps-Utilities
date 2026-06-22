@@ -67,7 +67,7 @@ else
                             test "${NAMESPACE}" = "EXIT" && break 4;
                             test "${NAMESPACE}" = "SELECT_ANOTHER_CONTEXT" && break 3;
                             while : ; do
-                                _lines_to_array SECRETS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secrets --no-headers | awk {'print $1'}; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
+                                _lines_to_array SECRETS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secrets --no-headers | awk '$1 !~ /^sh\.helm\.release/ {print $1}'; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
                                 say "👉 \e[96mSELECT\e[00m a SECRET in /[${CONTEXT}]/[${NAMESPACE}] to view its data:";
                                 echo;
                                 unset REPLY; unset SECRET;
