@@ -23,61 +23,73 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 
+# Bash 3.2 (macOS default) lacks mapfile; read stdin lines into array named by $1
+_lines_to_array() {
+    local _name="$1" _line
+    eval "${_name}=()"
+    while IFS= read -r _line; do
+        eval "${_name}+=(\"\${_line}\")"
+    done
+}
+
+# printf %b interprets \e etc. on Bash 3.2+ and Linux (echo -e does not on macOS)
+say() { printf '%b\n' "$*"; }
+
 #GET_AND_DECODE_SECRETS
 unset -f GET_AND_DECODE_SECRETS; function GET_AND_DECODE_SECRETS() {
 clear;
 if ! kubectl config get-contexts -o name > /dev/null 2>&1; then
-    echo -e "❌ \e[31mERROR:\e[00m No available kubectl contexts found in the kubeconfig file.";
+    say "❌ \e[31mERROR:\e[00m No available kubectl contexts found in the kubeconfig file.";
 else
     while : ; do
-        mapfile -t CONTEXTS < <(kubectl config get-contexts -o name; echo "EXIT");
-        echo -e "👉 \e[96mSELECT\e[00m a cluster CONTEXT to work with:";
+        _lines_to_array CONTEXTS < <(kubectl config get-contexts -o name; echo "EXIT");
+        say "👉 \e[96mSELECT\e[00m a cluster CONTEXT to work with:";
         echo;
         unset REPLY; unset CONTEXT;
         PS3="Selection: ";
         select CONTEXT in "${CONTEXTS[@]}"; do
             if [[ ${REPLY} =~ ^[0-9]+$ && ${REPLY} -gt 0 && ${REPLY} -le ${#CONTEXTS[@]} ]]; then
                 echo;
-                echo -e "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:CONTEXT[${CONTEXT}]";
+                say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:CONTEXT[${CONTEXT}]";
                 echo;
                 test "${CONTEXT}" = "EXIT" && break 2;
                 while : ; do
-                    mapfile -t NAMESPACES < <(kubectl --context "${CONTEXT}" get namespaces --no-headers=true | awk '{print $1}'; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
-                    echo -e "👉 \e[96mSELECT\e[00m a NAMESPACE in /[${CONTEXT}] to work with:";
+                    _lines_to_array NAMESPACES < <(kubectl --context "${CONTEXT}" get namespaces --no-headers=true | awk '{print $1}'; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
+                    say "👉 \e[96mSELECT\e[00m a NAMESPACE in /[${CONTEXT}] to work with:";
                     echo;
                     unset REPLY; unset NAMESPACE;
                     PS3="Selection: ";
                     select NAMESPACE in "${NAMESPACES[@]}"; do
                         if [[ ${REPLY} =~ ^[0-9]+$ && ${REPLY} -gt 0 && ${REPLY} -le ${#NAMESPACES[@]} ]]; then
                             echo;
-                            echo -e "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:NAMESPACE[${NAMESPACE}]";
+                            say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:NAMESPACE[${NAMESPACE}]";
                             echo;
                             test "${NAMESPACE}" = "EXIT" && break 4;
                             test "${NAMESPACE}" = "SELECT_ANOTHER_CONTEXT" && break 3;
                             while : ; do
-                                mapfile -t SECRETS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secrets --no-headers | awk {'print $1'}; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
-                                echo -e "👉 \e[96mSELECT\e[00m a SECRET in /[${CONTEXT}]/[${NAMESPACE}] to view its data:";
+                                _lines_to_array SECRETS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secrets --no-headers | awk {'print $1'}; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
+                                say "👉 \e[96mSELECT\e[00m a SECRET in /[${CONTEXT}]/[${NAMESPACE}] to view its data:";
                                 echo;
                                 unset REPLY; unset SECRET;
                                 PS3="Selection: ";
                                 select SECRET in "${SECRETS[@]}"; do
                                     if [[ ${REPLY} =~ ^[0-9]+$ && ${REPLY} -gt 0 && ${REPLY} -le ${#SECRETS[@]} ]]; then
                                         echo;
-                                        echo -e "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:SECRET[${SECRET}]";
+                                        say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:SECRET[${SECRET}]";
                                         echo;
                                         test "${SECRET}" = "EXIT" && break 6;
                                         test "${SECRET}" = "SELECT_ANOTHER_CONTEXT" && break 5;
                                         test "${SECRET}" = "SELECT_ANOTHER_NAMESPACE" && break 3;
                                         while : ; do
-                                            mapfile -t KEYS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq '.data' | cut -d: -f1; echo "SELECT_ANOTHER_SECRET"; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
-                                            echo -e "👉 \e[96mSELECT\e[00m a KEY in /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}] to view its value:";
+                                            _lines_to_array KEYS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq '.data' | cut -d: -f1; echo "SELECT_ANOTHER_SECRET"; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
+                                            say "👉 \e[96mSELECT\e[00m a KEY in /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}] to view its value:";
                                             echo;
                                             unset REPLY; unset KEY;
                                             PS3="Selection: ";
                                             select KEY in "${KEYS[@]}"; do
                                                 if [[ ${REPLY} =~ ^[0-9]+$ && ${REPLY} -gt 0 && ${REPLY} -le ${#KEYS[@]} ]]; then
                                                     echo;
-                                                    echo -e "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:KEY[${KEY}]";
+                                                    say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:KEY[${KEY}]";
                                                     echo;
                                                     test "${KEY}" = "EXIT" && break 8;
                                                     test "${KEY}" = "SELECT_ANOTHER_CONTEXT" && break 7;
@@ -85,12 +97,12 @@ else
                                                     test "${KEY}" = "SELECT_ANOTHER_SECRET" && break 3;
                                                     VALUE_ENCODED="$(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq ".data.\"${KEY}\"")";
                                                     if [[ -z "${VALUE_ENCODED}" || "${VALUE_ENCODED}" = '""' ]]; then
-                                                        echo -e "\e[35mWARNING:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]=[${VALUE_ENCODED}]";
-                                                        echo -e "\e[35mWARNING:\e[00m [$(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq ".data" | grep -E "^${KEY}: ")]";
+                                                        say "\e[35mWARNING:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]=[${VALUE_ENCODED}]";
+                                                        say "\e[35mWARNING:\e[00m [$(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq ".data" | grep -E "^${KEY}: ")]";
                                                     else
                                                         if [[ "${KEY}" =~ ^(tls.crt|ca.crt)$ ]]; then
                                                             if ( openssl x509 -noout -subject -issuer -dates -in <(echo "${VALUE_ENCODED}" | base64 -d) > /dev/null 2>&1 ); then 
-                                                                echo -e "✅ \e[32mSUCCESS:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]:";
+                                                                say "✅ \e[32mSUCCESS:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]:";
                                                                 # openssl x509 -noout -text -in <(echo "${VALUE_ENCODED}" | base64 -d); echo;
                                                                 openssl storeutl -noout -text -certs <(echo "${VALUE_ENCODED}" | base64 -d) | \
                                                                     grep --color=always -E \
@@ -106,57 +118,57 @@ else
                                                                         -e "DNS:" \
                                                                         -e "Total found:";
                                                             else
-                                                                echo -e "❌ \e[31mERROR:\e[00m Unable to decode certificate at /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]:";
-                                                                echo -e "❌ \e[31mERROR:\e[00m Base64 ENCODED returned value was; \n[${VALUE_ENCODED}\n]";
-                                                                echo -e "❌ \e[31mERROR:\e[00m Base64 DECODED returned value was; \n[$(echo "${VALUE_ENCODED}" | base64 -d)]\n";
+                                                                say "❌ \e[31mERROR:\e[00m Unable to decode certificate at /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}]:";
+                                                                say "❌ \e[31mERROR:\e[00m Base64 ENCODED returned value was; \n[${VALUE_ENCODED}\n]";
+                                                                say "❌ \e[31mERROR:\e[00m Base64 DECODED returned value was; \n[$(echo "${VALUE_ENCODED}" | base64 -d)]\n";
                                                             fi;
                                                         elif [[ "${KEY}" = "tls.key" ]]; then
                                                             echo "${VALUE_ENCODED}" | base64 -d | openssl rsa --noout -check;
                                                             VAR_MODULUS_KEY=$(echo "${VALUE_ENCODED}" | base64 -d | openssl rsa -modulus -noout | openssl md5 | awk '{print $2}');
                                                             VAR_MODULUS_CERT=$(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -modulus -noout | openssl md5 | awk '{print $2}');
                                                             if [[ "${VAR_MODULUS_KEY}" = "${VAR_MODULUS_CERT}" ]]; then
-                                                                echo -e "✅ \e[32mSUCCESS:\e[00m MATCH /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] + /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.tls.crt";
+                                                                say "✅ \e[32mSUCCESS:\e[00m MATCH /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] + /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.tls.crt";
                                                             else
-                                                                echo -e "❌ \e[31mERROR:\e[00m MISMATCH /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] + /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.tls.crt";
+                                                                say "❌ \e[31mERROR:\e[00m MISMATCH /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] + /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.tls.crt";
                                                             fi;
                                                         else
-                                                            echo -e "✅ \e[32mSUCCESS:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] = [\n$(echo "${VALUE_ENCODED}" | base64 -d)\n]";
+                                                            say "✅ \e[32mSUCCESS:\e[00m /[${CONTEXT}]/[${NAMESPACE}]/[${SECRET}]/.data.[${KEY}] = [\n$(echo "${VALUE_ENCODED}" | base64 -d)\n]";
                                                         fi;
                                                     fi;
 	                                                  echo;
                                                     break 1;
                                                 else
                                                     echo;
-                                                    echo -e "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && echo -e "Nothing was entered" || echo -e "You entered [${REPLY}]") - Please select a valid value from the available list.";
+                                                    say "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && say "Nothing was entered" || say "You entered [${REPLY}]") - Please select a valid value from the available list.";
                                                     echo;
-                                                    echo -e "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
+                                                    say "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
                                                     echo;
                                                 fi;
                                             done;
                                         done;
                                     else
                                         echo;
-                                        echo -e "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && echo -e "Nothing was entered" || echo -e "You entered [${REPLY}]") - Please select a valid value from the available list.";
+                                        say "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && say "Nothing was entered" || say "You entered [${REPLY}]") - Please select a valid value from the available list.";
                                         echo;
-                                        echo -e "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
+                                        say "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
                                         echo;
                                     fi;
                                 done;
                             done;
                         else
                             echo;
-                            echo -e "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && echo -e "Nothing was entered" || echo -e "You entered [${REPLY}]") - Please select a valid value from the available list.";
+                            say "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && say "Nothing was entered" || say "You entered [${REPLY}]") - Please select a valid value from the available list.";
                             echo;
-                            echo -e "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
+                            say "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
                             echo;
                         fi;
                     done;
                 done;
             else
                 echo;
-                echo -e "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && echo -e "Nothing was entered" || echo -e "You entered [${REPLY}]") - Please select a valid value from the available list.";
+                say "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && say "Nothing was entered" || say "You entered [${REPLY}]") - Please select a valid value from the available list.";
                 echo;
-                echo -e "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
+                say "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
                 echo;
             fi;
         done;
