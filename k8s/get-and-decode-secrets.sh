@@ -126,9 +126,19 @@ _show_decoded_private_key() {
 unset -f GET_AND_DECODE_SECRETS; function GET_AND_DECODE_SECRETS() {
 clear;
 if ! kubectl config get-contexts -o name > /dev/null 2>&1; then
-    say "❌ \e[31mERROR:\e[00m No available kubectl contexts found in the kubeconfig file.";
-else
-    while : ; do
+    say "❌ \e[31mERROR:\e[00m Unable to read kubectl contexts from the kubeconfig file.";
+    return 1;
+fi
+while : ; do
+    _lines_to_array CONTEXTS < <(kubectl config get-contexts -o name);
+    if [[ ${#CONTEXTS[@]} -eq 0 ]]; then
+        say "❌ \e[31mERROR:\e[00m No available kubectl contexts found in the kubeconfig file.";
+        return 1;
+    elif [[ ${#CONTEXTS[@]} -eq 1 ]]; then
+        CONTEXT="${CONTEXTS[0]}";
+        say "ℹ️  \e[36mINFO:\e[00m Using the only available context [${CONTEXT}]";
+        echo;
+    else
         _lines_to_array CONTEXTS < <(kubectl config get-contexts -o name; echo "EXIT");
         say "👉 \e[96mSELECT\e[00m a cluster CONTEXT to work with:";
         echo;
@@ -139,8 +149,18 @@ else
                 echo;
                 say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:CONTEXT[${CONTEXT}]";
                 echo;
-                test "${CONTEXT}" = "EXIT" && break 2;
-                while : ; do
+                test "${CONTEXT}" = "EXIT" && return 0;
+                break;
+            else
+                echo;
+                say "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && say "Nothing was entered" || say "You entered [${REPLY}]") - Please select a valid value from the available list.";
+                echo;
+                say "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
+                echo;
+            fi;
+        done;
+    fi;
+    while : ; do
                     _lines_to_array NAMESPACES < <(kubectl --context "${CONTEXT}" get namespaces --no-headers=true | awk '{print $1}'; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
                     say "👉 \e[96mSELECT\e[00m a NAMESPACE in /[${CONTEXT}] to work with:";
                     echo;
@@ -151,8 +171,8 @@ else
                             echo;
                             say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:NAMESPACE[${NAMESPACE}]";
                             echo;
-                            test "${NAMESPACE}" = "EXIT" && break 4;
-                            test "${NAMESPACE}" = "SELECT_ANOTHER_CONTEXT" && break 3;
+                            test "${NAMESPACE}" = "EXIT" && break 3;
+                            test "${NAMESPACE}" = "SELECT_ANOTHER_CONTEXT" && break 2;
                             while : ; do
                                 _lines_to_array SECRETS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secrets --no-headers | awk '$1 !~ /^sh\.helm\.release/ {print $1}'; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
                                 say "👉 \e[96mSELECT\e[00m a SECRET in /[${CONTEXT}]/[${NAMESPACE}] to view its data:";
@@ -164,8 +184,8 @@ else
                                         echo;
                                         say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:SECRET[${SECRET}]";
                                         echo;
-                                        test "${SECRET}" = "EXIT" && break 6;
-                                        test "${SECRET}" = "SELECT_ANOTHER_CONTEXT" && break 5;
+                                        test "${SECRET}" = "EXIT" && break 5;
+                                        test "${SECRET}" = "SELECT_ANOTHER_CONTEXT" && break 4;
                                         test "${SECRET}" = "SELECT_ANOTHER_NAMESPACE" && break 3;
                                         while : ; do
                                             _lines_to_array KEYS < <(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq '.data' | cut -d: -f1; echo "SELECT_ANOTHER_SECRET"; echo "SELECT_ANOTHER_NAMESPACE"; echo "SELECT_ANOTHER_CONTEXT"; echo "EXIT");
@@ -178,9 +198,9 @@ else
                                                     echo;
                                                     say "ℹ️  \e[36mINFO:\e[00m You picked [${REPLY}]:KEY[${KEY}]";
                                                     echo;
-                                                    test "${KEY}" = "EXIT" && break 8;
-                                                    test "${KEY}" = "SELECT_ANOTHER_CONTEXT" && break 7;
-                                                    test "${KEY}" = "SELECT_ANOTHER_NAMESPACE" && break 5;
+                                                    test "${KEY}" = "EXIT" && break 7;
+                                                    test "${KEY}" = "SELECT_ANOTHER_CONTEXT" && break 6;
+                                                    test "${KEY}" = "SELECT_ANOTHER_NAMESPACE" && break 4;
                                                     test "${KEY}" = "SELECT_ANOTHER_SECRET" && break 3;
                                                     VALUE_ENCODED="$(kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get secret "${SECRET}" -o=yaml | yq ".data.\"${KEY}\"")";
                                                     if [[ -z "${VALUE_ENCODED}" || "${VALUE_ENCODED}" = '""' ]]; then
@@ -223,17 +243,8 @@ else
                             echo;
                         fi;
                     done;
-                done;
-            else
-                echo;
-                say "❌ \e[31mERROR:\e[00m User Input Error - $(test -z "${REPLY}" && say "Nothing was entered" || say "You entered [${REPLY}]") - Please select a valid value from the available list.";
-                echo;
-                say "🔁 \e[34mRETRY:\e[00mPlease try again"'!!!';
-                echo;
-            fi;
-        done;
     done;
-fi;
+done;
 }
 GET_AND_DECODE_SECRETS;
 }
