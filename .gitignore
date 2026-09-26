@@ -1,0 +1,60 @@
+**/*.ignore
+
+# Cursor workspace overlay
+.cursor/
+.cursorignore
+
+# Secrets / credentials (keep in sync with Cursor/cursorignore)
+**/*.creds
+**/.creds
+**/.creds.*
+**/.credential
+**/.credential.*
+!**/.creds.example
+!**/.creds.*.example
+!**/.credential.example
+!**/.credential.*.example
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+**/secrets.env
+!**/secrets.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa
+**/credentials.json
+**/*-credentials.json
+**/serviceAccountKey.json
+
+# Script output directories
+**/LOGS/
+**/OUTPUTS/
+
+# Ignore log/output files
+*.log
+*.out
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.DS_Store?
+
+# Apple/Resource forks (sometimes appear)
+*.Apple
+*.icloud
+
+# Xcode
+DerivedData/
+*.xcuserstate
+*.xcworkspacedata
+*.moved-aside
+build/
+DerivedData/
